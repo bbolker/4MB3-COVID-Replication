@@ -154,9 +154,9 @@ plot_sim <- function(use_age_structure =TRUE,
     sim$"Recovered" <- sim$R
     sim$"Cumulative Recovered" <- cumsum(sim$R)
     sim$"Death" <- sim$D
-    sim$"Cumulative Death" <- cumsum(sim$D)
+    sim$"Cumulative Deaths" <- cumsum(sim$D)
     ##Drop original columns
-    sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered")]
+    sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered", "Cumulative Deaths")]
   }
   else{
         sim <- sim[-seq(from = 2, to = length(sim), by = 5)]
