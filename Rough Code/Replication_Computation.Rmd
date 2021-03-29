@@ -24,11 +24,11 @@ make_params <- function(Beta = 0.4215,
                         delta = 0.0028,
                         v = v_func,
                         N = theN,
-                        q = 0,
+                        q = 0.2,
                         nu = 0,
                         reinf = 0,
-                        mu = 0,
-                        natural_death = 0 
+                        mu = 0.0001,
+                        natural_death = 0.0001 
                         ){
   return(c("Beta" = Beta,
               "gamma" = gamma,
@@ -41,7 +41,7 @@ make_params <- function(Beta = 0.4215,
                "natural_death" = natural_death))
 }
 make_inits <- function(S = theN - I,
-                    I = 7,
+                    I = 100,
                     Q = 0,
                     R = 0,
                     D = 0,
@@ -54,21 +54,38 @@ make_inits <- function(S = theN - I,
       "D" = D))
 }
 make_beta <- function(betavals = c(0.0251, 0.0355, 0.122, 0.1698, 0.4488)){
-  contact_matrix <- matrix(data = 5, nrow = 5, ncol = 5)
+  contact_matrix <- matrix(data = 16, nrow = 5, ncol = 5)
   Beta <- matrix(data = NA, nrow = 5, ncol = 5)
   for (i in 1:5){
     for (j in 1:5){
-      Beta[[i,j]] <- betavals[i]*contact_matrix[i,j]
+      Beta[[i,j]] <- betavals[[i]]*contact_matrix[i,j]
     }
   }
   return(Beta)
 }
 
-make_age_inits <- function(Nages = 5){
+make_age_inits <- function(N = theN,
+                          I1 = 15,
+                          I2 = 15,
+                          I3 = 15,
+                          I4 = 15,
+                          I5 = 15,
+                          S1 = (N - I1)/5,
+                          S2 = (N - I2)/5,
+                          S3 = (N - I3)/5,
+                          S4 = (N - I4)/5,
+                          S5 = (N - I5)/5,
+                          Q1 = 0, Q2 = 0, Q3 = 0, Q4 = 0, Q5 = 0,
+                          R1 = 0, R2 = 0, R3 = 0, R4 = 0, R5 = 0,
+                          D1 = 0, D2 = 0, D3 = 0, D4 = 0, D5 = 0){
 ##Divide by Nages so that the total compartments sum up to the original population.
- state <- as.vector(replicate(make_inits(), n = Nages))/Nages
- names(state) <- paste0(rep(stateNames, 5), c(rep(1, 5), rep(2, 5), rep(3,5), rep(4,5), rep(5,5)))
+ state <- c("S1" = S1, "S2" = S2, "S3" = S3, "S4" = S4, "S5" = S5,
+            "I1" = I1, "I2" = I2, "I3" = I3, "I4" = I4, "I5" = I5,
+            "Q1" = Q1, "Q2" = Q2, "Q3" = Q3, "Q4" = Q4, "Q5" = Q5,
+            "R1" = R1, "R2" = R2, "R3" = R3, "R4" = R4, "R5" = R5,
+            "D1" = D1, "D2" = D2, "D3" = D3, "D4" = D4, "D5" = D5)
  return(state)
+ 
 }
 
 paramNames <- c("Beta", "gamma", "delta", "N", "q", "nu", "reinf", "mu", "natural_death")
@@ -79,7 +96,7 @@ run_sim <- function(params = make_params(),
                     use_age_structure = TRUE,
                     age_init = make_age_inits(),
                     init = make_inits(),
-                    length = 150){
+                    length = 100){
   if (use_age_structure){
     theModel <- function(time, state, parameters){
       S <- as.matrix(state[1:5])   
@@ -96,7 +113,7 @@ run_sim <- function(params = make_params(),
         beta_I_sums[i] <- sum(theBeta[i,]%*%as.matrix(I/N))
       }
       dS <-  natural_death * (N - D) + reinf*R - (beta_I_sums + nu*v + mu)*S
-      dI <- beta_I_sums * S - (q + mu) *I
+      dI <- beta_I_sums*S - (q + mu) *I
       dQ <- q*I - (gamma + delta + mu) * Q
       dR <- gamma*Q + nu*v*S - (reinf+mu) * R
       dD <- delta * Q
@@ -124,8 +141,7 @@ if (use_age_structure){
                        times = time,
                         func = theModel,
                          parms = make_params()))
-   colnames(res) <- c("time", paste0(rep(stateNames, 5),
-                          c(rep(1, 5), rep(2, 5), rep(3,5), rep(4,5), rep(5,5))))
+   
   
 }
 
@@ -139,7 +155,6 @@ else{
 return(res)
 }
  
-
 plot_sim <- function(use_age_structure =TRUE,
                      sim = run_sim(use_age_structure = use_age_structure),
                      drop = c("S", "R")){
@@ -150,6 +165,7 @@ plot_sim <- function(use_age_structure =TRUE,
   library("tibble")
   ##Do this first.
   sim <- as_tibble(sim)
+
   if (!use_age_structure){
     sim$"Recovered" <- sim$R
     sim$"Cumulative Recovered" <- cumsum(sim$R)
@@ -159,7 +175,39 @@ plot_sim <- function(use_age_structure =TRUE,
     sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered", "Cumulative Deaths")]
   }
   else{
-        sim <- sim[-seq(from = 2, to = length(sim), by = 5)]
+    get_rid <- c()
+    ###Include options to drop all the corresponding states.
+    ##Select all the clolumsn that we don't want.
+    if ("S" %in% drop){
+      get_rid <- c(get_rid, 2:6)
+    }
+    else{
+    }
+    ##Use multiple if statements so we can drop more than one state at a time.
+    if ("I" %in% drop){
+      get_rid <- c(get_rid, 7:11)
+    }
+    else{
+    }
+    if ("Q" %in% drop){
+      get_rid <- c(get_rid, 12:16)
+    }
+    else{
+    }
+    if ("R" %in% drop){
+      get_rid <- c(get_rid, 17:21)
+    }
+    else{
+    }
+    if ("D" %in% drop){
+      get_rid <- c(get_rid, 22:26)
+    }
+    else{
+    }
+    ##Always keep the time variable, which is the first column.
+    ##These are the columns that we don't want.
+    keepIndices <- c(1, setdiff(1:26, get_rid))
+    sim <- sim[,keepIndices]
   }
   ncurves <- length(sim)
   sim <- tidyr::pivot_longer(sim, col = !time)
@@ -168,6 +216,7 @@ plot_sim <- function(use_age_structure =TRUE,
     labs(title = "Pandemic simulation",
          x = "Time (days)",
          y = "Count")
+  p <- direct.label(p)
   p
 }
 ```
