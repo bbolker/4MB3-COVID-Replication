@@ -153,7 +153,7 @@ DV = [df["Quarantined"].tolist(),df["RC"].tolist(), df["Deaths"].tolist()]
 from NoAgeStructure import eta, vt, q
 
 #omegaTest  = np.linspace(0,1,evalpoints)
-omegaTest = [0]
+omegaTest = [0,1,2]
 betaTest   = np.linspace(0,1,evalpoints)
 gammaTest  = np.linspace(0,1,evalpoints)
 deltaTest  = np.linspace(0,1,evalpoints)
@@ -162,6 +162,8 @@ infectedTest = np.linspace(0,100,101)
 
 t = np.arange(0,100 + dt, dt )
 sol = odeint(SIQRDode, y0, t, args = (argList,))
+
+MSEmin = (0,0,0,0,100000000000000)
 
 for i in omegaTest:
     for j in betaTest:
@@ -178,45 +180,33 @@ for i in omegaTest:
                     EvalOn = [sol[2],sol[3],sol[4]]
                     MSEsol = PaperSquaredError(EvalOn,
                                                DV)
-                    MSEnew = (i,j,k,l,m,MSEsol)
+                    MSEnew = (j,k,l,m,MSEsol)
                     
-                    if i == j == k == l == m == 0:
+
+                    if MSEnew[4] < MSEmin[4]:
                         MSEmin = MSEnew
                     
-                    if MSEnew[5] < MSEmin[5]:
-                        MSEmin = MSEnew
-                    
 
 
+print(MSEmin)
+
+beta  = MSEmin[0]
+gamma = MSEmin[1]
+delta = MSEmin[2]
+m     = MSEmin[3]
+
+argList1 = [pi,mu,gamma,delta,zeta,beta,eta,vt,q]
+
+sol = odeint(SIQRDode, y0, t, args = (argList,))
 
 
-
-
-
-
-
+#Test gradients --- should output graph
+plt.plot(t,sol[:,1], label = "I", color = "red")
+plt.plot(t,sol[:,3], label = "R", color = "green")
+plt.plot(t,sol[:,4], label = "D", color = "black")
+plt.legend()
         
         
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
