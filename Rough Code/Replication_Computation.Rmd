@@ -153,13 +153,15 @@ return(res)
 }
  
 plot_sim <- function(use_age_structure =TRUE,
-                     sim = run_sim(use_age_structure = use_age_structure),
+                     length = 150,
+                     sim = run_sim(use_age_structure = use_age_structure, length = length),
                      drop = c("S", "R")){
   library("dplyr")
   library("ggpubr")
   library("tidyr")
   library("directlabels")
   library("tibble")
+  library("lubridate")
   ##Do this first.
   sim <- as_tibble(sim)
 
@@ -209,12 +211,14 @@ plot_sim <- function(use_age_structure =TRUE,
   ncurves <- length(sim)
   sim <- tidyr::pivot_longer(sim, col = !time)
   ##Rename columns.
-  p <- ggline(data = sim, x= "time", y = "value", color = "name") +
+  p <- ggline(data = sim, x= "time", y = "value", color = "name", size = 1.5, plot_type = "l") +
     labs(title = "Pandemic simulation",
          x = "Time (days)",
          y = "Count")
-  p <- direct.label(p)
-  p
+  p <- p + scale_x_discrete(breaks = seq(from = 0,
+                                         to = length, by = 20),
+                            labels = month.name[month(lubridate::today() + days(seq(from = 0, to = length, by = 20)))])
+    p
 }
 ```
 
