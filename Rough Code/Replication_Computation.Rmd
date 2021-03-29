@@ -19,10 +19,10 @@ theN <- 270*10^9
 make_params <- function(Beta = 0.4215,
                         gamma = 0.0876,
                         delta = 0.0028,
-                        v = v_func,
+                        v = NULL,
                         N = theN,
                         q = 0.2,
-                        nu = 0,
+                        nu = 0.85,
                         reinf = 0,
                         mu = 0.0001,
                         natural_death = 0.0001 
@@ -87,13 +87,23 @@ make_age_inits <- function(N = theN,
 
 paramNames <- c("Beta", "gamma", "delta", "N", "q", "nu", "reinf", "mu", "natural_death")
 stateNames <- c("S",  "I", "Q", "R", "D")
-
-
 run_sim <- function(params = make_params(),
+                    ##A function of time for the vaccination strategy.
+                    vaccine_strategy = NULL,
                     use_age_structure = TRUE,
                     age_init = make_age_inits(),
                     init = make_inits(),
                     length = 100){
+  ##First decide vaccine strategy.
+  if (!is.null(vaccine_strategy)){
+      v_func <- vaccine_strategy
+  }
+  else{
+    ##Return the null vaccination strategy.
+    v_func <- function(t){
+      return(0)
+      }
+  }
   if (use_age_structure){
     theModel <- function(time, state, parameters){
       S <- as.matrix(state[1:5])   
@@ -151,30 +161,10 @@ else{
 }
 return(res)
 }
- 
-plot_sim <- function(use_age_structure =TRUE,
-                     length = 150,
-                     sim = run_sim(use_age_structure = use_age_structure, length = length),
-                     drop = c("S", "R")){
-  library("dplyr")
-  library("ggpubr")
-  library("tidyr")
-  library("directlabels")
-  library("tibble")
-  library("lubridate")
-  ##Do this first.
-  sim <- as_tibble(sim)
-
-  if (!use_age_structure){
-    sim$"Recovered" <- sim$R
-    sim$"Cumulative Recovered" <- cumsum(sim$R)
-    sim$"Death" <- sim$D
-    sim$"Cumulative Deaths" <- cumsum(sim$D)
-    ##Drop original columns
-    sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered", "Cumulative Deaths")]
-  }
-  else{
-    get_rid <- c()
+ ##Compute the KeepIndices for an age structured simulation, based on the columns that we want to drop.
+  ##Useful for plotting
+compute_keepIndices <- function(drop = c("S", "R")){
+  get_rid <- c()
     ###Include options to drop all the corresponding states.
     ##Select all the clolumsn that we don't want.
     if ("S" %in% drop){
@@ -206,12 +196,92 @@ plot_sim <- function(use_age_structure =TRUE,
     ##Always keep the time variable, which is the first column.
     ##These are the columns that we don't want.
     keepIndices <- c(1, setdiff(1:26, get_rid))
+    return(keepIndices)
+}
+
+plot_sim <- function(use_age_structure =TRUE,
+                     length = 150,
+                     vaccine_strategy = NULL,
+                     sim = run_sim(use_age_structure = use_age_structure,
+                                   length = length,
+                                   vaccine_strategy = vaccine_strategy),
+
+                     drop = c("S", "R")){
+  library("dplyr")
+  library("ggpubr")
+  library("tidyr")
+  library("directlabels")
+  library("tibble")
+  library("lubridate")
+  ##Do this first.
+  sim <- as_tibble(sim)
+  if (!use_age_structure){
+    sim$"Recovered" <- sim$R
+    sim$"Cumulative Recovered" <- cumsum(sim$R)
+    sim$"Death" <- sim$D
+    sim$"Cumulative Deaths" <- cumsum(sim$D)
+    ##Drop original columns
+    sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered", "Cumulative Deaths")]
+  }
+  ##This will only work if our data is still in the long form.
+  else{
+    keepIndices <- compute_keepIndices(drop = drop)
     sim <- sim[,keepIndices]
   }
   ncurves <- length(sim)
+  ##If we haven't done this already
   sim <- tidyr::pivot_longer(sim, col = !time)
+  sim$"Compartment Type" <- sim$name
   ##Rename columns.
-  p <- ggline(data = sim, x= "time", y = "value", color = "name", size = 1.5, plot_type = "l") +
+  p <- ggline(data = sim, x= "time", y = "value", color = "Compartment Type", size = 1.5, plot_type = "l") +
+    labs(title = "Pandemic simulation",
+         x = "Time (days)",
+         y = "Count")
+  p <- p + scale_x_discrete(breaks = seq(from = 0,
+                                         to = length, by = 20),
+                            labels = month.name[month(lubridate::today() + days(seq(from = 0, to = length, by = 20)))])
+    p
+}
+
+compare_vaccine_plot <- function(strat = NULL,
+                                 length = 150,
+                                 use_age_structure = FALSE,
+                                 strat1 = NULL,
+                                 strat2 = NULL,
+                                 drop = c("S", "R", "D","Q")){
+  library("tidyr")
+  ##Allow for customs strategies to be coded in for simplicity
+  if(!is.null(strat)){
+      if (strat == "t_null"){
+    strat1 <- function(t){return(0)}
+    strat2 <- function(t){return(t)}
+      }
+  }
+else{
+      sim1 = run_sim(use_age_structure = use_age_structure,
+                                     length = length,
+                                     vaccine_strategy = strat1)
+      sim2 = run_sim(use_age_structure = use_age_structure,
+                                     length = length,
+                                     vaccine_strategy = strat2)
+      if (use_age_structure){
+      ##If we're using age structure, do this first before we convert to long form.
+      sim1 <- sim1[,compute_keepIndices(drop)]
+      sim2 <- sim2[,compute_keepIndices(drop)]
+      }
+      else{
+        sim1 <- sim1[,!colnames(sim1) %in% drop]
+        sim2 <- sim2[,!colnames(sim2) %in% drop]
+      }
+}
+      ##Add the vaccination strategy to the labels of whatever is left.
+          colnames(sim1) <- c("time", paste0(colnames(sim1)[2:length(colnames(sim1))], ": Vaccination Strategy 1"))
+          colnames(sim2) <- c("time", paste0(colnames(sim2)[2:length(colnames(sim2))], ": Vaccination Strategy 2"))
+    sim1 <- tidyr::pivot_longer(sim1, col = !time)
+    sim2 <- tidyr::pivot_longer(sim2, col = !time)
+    sim <- dplyr::bind_rows(sim1, sim2)
+    sim$"Compartment" <- sim$"name"
+    p <- ggline(data = sim, x= "time", y = "value", color = "Compartment", size = 1.5, plot_type = "l") +
     labs(title = "Pandemic simulation",
          x = "Time (days)",
          y = "Count")
