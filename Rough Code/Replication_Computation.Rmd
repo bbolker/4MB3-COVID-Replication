@@ -15,9 +15,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library("deSolve")
 library("tibble")
 
-v_func <- function(t){
-  return(0)
-}
 theN <- 270*10^9
 make_params <- function(Beta = 0.4215,
                         gamma = 0.0876,
@@ -212,7 +209,7 @@ plot_sim <- function(use_age_structure =TRUE,
   ncurves <- length(sim)
   sim <- tidyr::pivot_longer(sim, col = !time)
   ##Rename columns.
-  p <- ggscatter(data = sim, x= "time", y = "value", color = "name") +
+  p <- ggline(data = sim, x= "time", y = "value", color = "name") +
     labs(title = "Pandemic simulation",
          x = "Time (days)",
          y = "Count")
