@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library("deSolve")
 library("tibble")
 
-theN <- 270*10^9
+theN <- 10*10^6
 make_params <- function(Beta = 0.4215,
                         gamma = 0.0876,
                         delta = 0.0028,
@@ -23,7 +23,7 @@ make_params <- function(Beta = 0.4215,
                         N = theN,
                         q = 0.2,
                         nu = 0.85,
-                        reinf = 0,
+                        reinf = 0.5,
                         mu = 0.0001,
                         natural_death = 0.0001 
                         ){
@@ -51,7 +51,7 @@ make_inits <- function(S = theN - I,
       "D" = D))
 }
 make_beta <- function(betavals = c(0.0251, 0.0355, 0.122, 0.1698, 0.4488)){
-  contact_matrix <- matrix(data = 16, nrow = 5, ncol = 5)
+  contact_matrix <- matrix(data = 5, nrow = 5, ncol = 5)
   Beta <- matrix(data = NA, nrow = 5, ncol = 5)
   for (i in 1:5){
     for (j in 1:5){
@@ -216,8 +216,8 @@ plot_sim <- function(use_age_structure =TRUE,
   ##Do this first.
   sim <- as_tibble(sim)
   if (!use_age_structure){
-    sim$"Recovered" <- sim$R
-    sim$"Cumulative Recovered" <- cumsum(sim$R)
+    sim$"Immune" <- sim$R
+    sim$"Cumulative Immune" <- cumsum(sim$R)
     sim$"Death" <- sim$D
     sim$"Cumulative Deaths" <- cumsum(sim$D)
     ##Drop original columns
