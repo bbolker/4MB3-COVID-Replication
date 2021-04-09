@@ -1,0 +1,299 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+"Mathematical Models for Assessing Vaccination Scenarios in Several Provinces in Indonesia N. Nuraini, K. Khairudin, P. Hadisoemarto, H. Susanto, A. Hasan, and N. Sumarti"
+
+Expanding old gradient functions from replication assignment to incorporate awarness.
+
+```{r}
+library("deSolve")
+library("tibble")
+theN <- 10*10^6
+make_params <- function(Beta = 0.4215,
+                        N = theN,
+                        gamma = 0.0876,
+                        delta = 0.0028,
+                        ##Awarness constant.
+                        delta_c = 50/N,
+                        ##For each age class
+                        deltas = c(5, 10, 15, 20, 25),
+                        v = NULL,
+                        q = 0.2,
+                        nu = 0.85,
+                        ##Sharpness constant
+                        k = 3,
+                        reinf = 0.5,
+                        mu = 0.0001,
+                        natural_death = 0.0001 
+                        ){
+  return(c("Beta" = Beta,
+              "gamma" = gamma,
+              "delta" = delta,
+               "N" = N,
+              ##N * delta_c = 50,
+              "delta_c" = delta_c,
+              "q" = q,
+              "nu" = nu,
+              "k" = k,
+           "deltas" = deltas,
+              "reinf" = reinf,
+              "mu" = mu,
+             "natural_death" = natural_death))
+}
+make_inits <- function(S = theN - I,
+                    I = 100,
+                    Q = 0,
+                    R = 0,
+                    D = 0,
+                    N = theN){
+    return(c(
+      "S" = S,
+      "I" = I,
+      "Q" = Q,
+      "R" = R,
+      "D" = D))
+}
+make_beta <- function(betavals = c(0.0251, 0.0355, 0.122, 0.1698, 0.4488)){
+  contact_matrix <- matrix(data = 5, nrow = 5, ncol = 5)
+  Beta <- matrix(data = NA, nrow = 5, ncol = 5)
+  for (i in 1:5){
+    for (j in 1:5){
+      Beta[[i,j]] <- betavals[[i]]*contact_matrix[i,j]
+    }
+  }
+  return(Beta)
+}
+make_age_inits <- function(I0= c(55, 55, 55, 55, 55), N = theN){
+  ##Cite Dr. Bolker's Feedback on Milestone 1 
+  n_age <- length(I0)
+ state <- unlist(c(S=(N-I0)/n_age, I=I0, Q=rep(0,n_age), R=rep(0, n_age),
+D=rep(0,n_age)))
+ return(state)
+ 
+}
+paramNames <- c("Beta", "gamma", "delta", "N", "q", "nu", "reinf", "mu", "natural_death")
+stateNames <- c("S",  "I", "Q", "R", "D")
+run_sim <- function(params = make_params(),
+                    use_awareness = FALSE,
+                    ##A function of time for the vaccination strategy.
+                    vaccine_strategy = NULL,
+                    use_age_structure = TRUE,
+                    age_init = make_age_inits(),
+                    init = make_inits(),
+                    length = 100){
+  ##First decide vaccine strategy.
+  if (!is.null(vaccine_strategy)){
+      v_func <- vaccine_strategy
+  }
+  else{
+    ##Return the null vaccination strategy.
+    v_func <- function(t){
+      return(0)
+      }
+  }
+  if (use_age_structure){
+    if (!use_awareness){
+      theModel <- function(time, state, parameters){
+      S <- as.matrix(state[1:5])   
+      I <- as.matrix(state[6:10])    
+      Q <- as.matrix(state[11:15])  
+      R <- as.matrix(state[16:20])   
+      D <- as.matrix(state[21:25])
+      with(as.list(c(parameters)), {
+        v <- v_func(time)
+        v_hat <- nu * v
+      theBeta <-  make_beta()
+      beta_I_sums <- numeric(5)
+      for (i in 1:5){
+        beta_I_sums[i] <- sum(theBeta[i,]%*%as.matrix(I/N))
+      }
+      dS <-  natural_death * (N - D) + reinf*R - (beta_I_sums + nu*v + mu)*S
+      dI <- beta_I_sums*S - (q + mu) *I
+      dQ <- q*I - (gamma + delta + mu) * Q
+      dR <- gamma*Q + nu*v*S - (reinf+mu) * R
+      dD <- delta * Q
+      return(list(c(dS, dI, dQ, dR, dD)))
+      })
+    }
+    }
+    else{
+     ##Use age structure and awareness. 
+      theModel <- function(time, state, parameters){
+      S <- as.matrix(state[1:5])   
+      I <- as.matrix(state[6:10])    
+      Q <- as.matrix(state[11:15])  
+      R <- as.matrix(state[16:20])   
+      D <- as.matrix(state[21:25])
+      with(as.list(c(parameters)), {
+        v <- v_func(time)
+        v_hat <- nu * v
+      theBeta <-  make_beta()
+      beta_I_sums <- numeric(5)
+      ##Do this first
+      dD <- delta * Q
+    ##Cite Dr. Bolker's Milestone 1 Feedback.
+    keep <-  grepl(names(parameters), pattern = paste("deltas",collapse="|"))
+    deltas <- parameters[keep]
+      for (i in 1:5){
+        beta_I_sums[i] <- sum(theBeta[i,]%*%as.matrix(I/(N)))/((1+(dD[i]/deltas[i])^k))
+      }
+      dS <-  natural_death * (N - D) + reinf*R - (beta_I_sums + nu*v + mu)*S
+      dI <- beta_I_sums*S - (q + mu) *I
+      dQ <- q*I - (gamma + delta + mu) * Q
+      dR <- gamma*Q + nu*v*S - (reinf+mu) * R
+      return(list(c(dS, dI, dQ, dR, dD)))
+      })
+    }
+    }
+  }
+  else{
+    if (!use_awareness){
+        theModel <- function(time, state, parameters) {
+      with(as.list(c(state, parameters)), {
+        v <- v_func(time)
+        v_hat <- nu * v
+        dS <-  natural_death*(N - D) + reinf*R - (Beta*(I)/(N) + nu*v + mu)*S
+        dI <- Beta*I*S / N - (q + mu) *I
+        dQ <- q *I - (gamma + delta + mu) * Q
+        dR <- gamma*Q + nu*v*S - (reinf+mu) * R
+        dD <- delta * Q
+        return(list(c(dS, dI, dQ, dR, dD)))
+      })
+    }
+    }
+    else{
+      theModel <- function(time, state, parameters) {
+      with(as.list(c(state, parameters)), {
+        v <- v_func(time)
+        v_hat <- nu * v
+        dD <- delta * Q
+        dS <-  natural_death*(N - D) + reinf*R - (Beta*(I)/(N*(1+(dD/delta_c)^k)) + nu*v + mu)*S
+        dI <- Beta*I*S /(N*((1+(dD/delta_c))^k)) - (q + mu) *I
+        dQ <- q *I - (gamma + delta + mu) * Q
+        dR <- gamma*Q + nu*v*S - (reinf+mu) * R
+        return(list(c(dS, dI, dQ, dR, dD)))
+      })
+    }
+    }
+  }
+time <- seq(from = 0, to = length, by = 1)
+if (use_age_structure){
+   res <- as.data.frame(ode(y = age_init,
+                       times = time,
+                        func = theModel,
+                         parms = params))
+   
+  
+}
+else{
+  res <- as.data.frame(ode(y = init,
+                       times = time,
+                        func = theModel,
+                         parms = params))
+  colnames(res) <- c("time", stateNames)
+}
+return(res)
+}
+plot_sim <- function(use_age_structure =TRUE,
+                     length = 150,
+                     use_awareness = FALSE,
+                     vaccine_strategy = NULL,
+                     sim = run_sim(use_age_structure = use_age_structure,
+                                   length = length,
+                                   use_awareness = use_awareness,
+                                   vaccine_strategy = vaccine_strategy),
+                     drop = c("S", "R")){
+  library("dplyr")
+  library("ggpubr")
+  library("tidyr")
+  library("directlabels")
+  library("lubridate")
+  ##Do this first.
+  sim <- as_tibble(sim)
+  if (!use_age_structure){
+    sim$"Immune" <- sim$R
+    sim$"Cumulative Immune" <- cumsum(sim$R)
+    sim$"Death" <- sim$D
+    sim$"Cumulative Deaths" <- cumsum(sim$D)
+    ##Drop original columns
+    sim <- sim[,!colnames(sim) %in% c("S", "D", "R", "Cumulative Recovered", "Cumulative Deaths")]
+  }
+  ##This will only work if our data is still in the long form.
+  else{
+    ##Cite Dr. Bolker's Milestone 1 Feedback.
+    throwout <-  grepl(colnames(sim), pattern = paste(drop,collapse="|"))
+    sim <- sim[,!throwout]
+  }
+  ncurves <- length(sim)
+  ##If we haven't done this already
+  sim <- tidyr::pivot_longer(sim, col = !time)
+  sim$"Compartment Type" <- sim$name
+  ##Rename columns.
+  p <- ggline(data = sim, x= "time", y = "value", color = "Compartment Type", size = 1.5, plot_type = "l") +
+    labs(title = "Pandemic simulation",
+         x = "Time (days)",
+         y = "Count")
+  p <- p + scale_x_discrete(breaks = seq(from = 0,
+                                         to = length, by = 20),
+                            labels = month.name[month(lubridate::today() + days(seq(from = 0, to = length, by = 20)))])
+    p
+}
+compare_vaccine_plot <- function(strat = NULL,
+                                 length = 150,
+                                 use_age_structure = FALSE,
+                                 strat1 = NULL,
+                                 strat2 = NULL,
+                                 drop = c("S", "R", "D","Q")){
+  library("tidyr")
+  ##Allow for customs strategies to be coded in for simplicity
+  if(!is.null(strat)){
+      if (strat == "t_null"){
+    strat1 <- function(t){return(0)}
+    strat2 <- function(t){return(t)}
+      }
+    else{
+    }
+  }
+else{
+}
+      sim1 <- run_sim(use_age_structure = use_age_structure,
+                                     length = length,
+                                     vaccine_strategy = strat1)
+      sim2 <- run_sim(use_age_structure = use_age_structure,
+                                     length = length,
+                                     vaccine_strategy = strat2)
+      if (use_age_structure){
+      ##If we're using age structure, do this first before we convert to long form.
+      sim1 <- sim1[,!grepl(colnames(sim1), pattern = paste(drop,collapse="|"))]
+      sim2 <- sim2[,!grepl(colnames(sim2), pattern = paste(drop,collapse="|"))]
+      }
+      else{
+        sim1 <- sim1[,!colnames(sim1) %in% drop]
+        sim2 <- sim2[,!colnames(sim2) %in% drop]
+      }
+      ##Add the vaccination strategy to the labels of whatever is left.
+colnames(sim1) <- c("time", paste0(colnames(sim1)[2:length(colnames(sim1))], ": Vaccination Strategy 1"))
+colnames(sim2) <- c("time", paste0(colnames(sim2)[2:length(colnames(sim2))], ": Vaccination Strategy 2"))
+    sim1 <- tidyr::pivot_longer(sim1, col = !time)
+    sim2 <- tidyr::pivot_longer(sim2, col = !time)
+    sim <- dplyr::bind_rows(sim1, sim2)
+    sim$"Compartment" <- sim$"name"
+    p <- ggline(data = sim, x= "time", y = "value", color = "Compartment", size = 1.5, plot_type = "l") +
+    labs(title = "Pandemic simulation",
+         x = "Time (days)",
+         y = "Count")
+  p <- p + scale_x_discrete(breaks = seq(from = 0,
+                                         to = length, by = 20),
+                            labels = month.name[month(lubridate::today() + days(seq(from = 0, to = length, by = 20)))])
+    p
+    
+}
+
+para = make_params()
+para["Beta"] <- 0
+print(para == make_params())
+run_sim(params = para)
+```
+
+

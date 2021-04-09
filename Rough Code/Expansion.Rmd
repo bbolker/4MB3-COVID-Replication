@@ -17,22 +17,22 @@ Expanding old gradient functions from replication assignment to incorporate awar
 library("deSolve")
 library("tibble")
 
-theN <- 10*10^6
-make_params <- function(Beta = 0.4215,
+theN <- 3565000
+make_params <- function(Beta = 0.421,
                         N = theN,
                         gamma = 0.0876,
                         delta = 0.0028,
                         ##Awarness constant.
                         delta_c = 50/N,
                         ##For each age class
-                        deltas = c(5, 10, 15, 20, 25),
+                        deltas = c(1, 4, 3, 2, 1),
                         v = NULL,
                         q = 0.2,
                         nu = 0.85,
                         ##Sharpness constant
                         k = 3,
                         reinf = 0.5,
-                        mu = 0.0001,
+                        mu = 0.000001,
                         natural_death = 0.0001 
                         ){
   return(c("Beta" = Beta,
@@ -50,7 +50,7 @@ make_params <- function(Beta = 0.4215,
              "natural_death" = natural_death))
 }
 make_inits <- function(S = theN - I,
-                    I = 100,
+                    I = 1,
                     Q = 0,
                     R = 0,
                     D = 0,
@@ -73,10 +73,15 @@ make_beta <- function(betavals = c(0.0251, 0.0355, 0.122, 0.1698, 0.4488)){
   return(Beta)
 }
 
-make_age_inits <- function(I0= c(55, 55, 55, 55, 55), N = theN){
+make_age_inits <- function(I0= c(1, 1, 1, 1, 1), N = theN){
+  #######I MADE ONE CHANGE HERE -JASON
+  #######Initial susceptables in age group highly variable as it 
+  #######DEPENDS HEAVILY ON POPULATION STUCTURE. Dug up CN census data
+  #######AND GOT THE PROPORTION OF POP IN EACH AGE GROUP. ADDED HERE
   ##Cite Dr. Bolker's Feedback on Milestone 1 
   n_age <- length(I0)
- state <- unlist(c(S=(N-I0)/n_age, I=I0, Q=rep(0,n_age), R=rep(0, n_age),
+  struct = c(0.105587012,0.257629189,0.245480097,0.269248731,0.122054971)
+ state <- unlist(c(S=(N-I0)*struct, I=I0, Q=rep(0,n_age), R=rep(0, n_age),
 D=rep(0,n_age)))
  return(state)
  
@@ -85,7 +90,7 @@ D=rep(0,n_age)))
 paramNames <- c("Beta", "gamma", "delta", "N", "q", "nu", "reinf", "mu", "natural_death")
 stateNames <- c("S",  "I", "Q", "R", "D")
 run_sim <- function(params = make_params(),
-                    use_awareness = FALSE,
+                    use_awareness = TRUE,
                     ##A function of time for the vaccination strategy.
                     vaccine_strategy = NULL,
                     use_age_structure = TRUE,
@@ -193,7 +198,7 @@ if (use_age_structure){
    res <- as.data.frame(ode(y = age_init,
                        times = time,
                         func = theModel,
-                         parms = make_params()))
+                         parms = params))
    
   
 }
@@ -302,6 +307,498 @@ colnames(sim2) <- c("time", paste0(colnames(sim2)[2:length(colnames(sim2))], ": 
                             labels = month.name[month(lubridate::today() + days(seq(from = 0, to = length, by = 20)))])
     p
 }
+
+
+para = make_params()
+
+para["Beta"] = 2
+run_sim(para)
+```
+
+
+This next few code chunks provide a nice framework for plotting the CN covid data by town, with plenty of options. meant for checking spacial heterogeniety condition. 
+```{python}
+#This chunk handles python imports
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+ByTown = pd.read_csv("ConCovidTowns.csv")
+ccv = pd.read_csv("ConCOVID.csv")
+AgeDeathDat = pd.read_csv("ageDeaths.csv")
+```
+
+This is the main code for plotting. 
+```{python}
+#read in the covid data organized by town.
+
+#These are graph settings for Seaborn. Can ignore if trying to understand code --- they mask matplotlib features I'm pretty sure.
+rc={'lines.linewidth': 4, 'axes.labelsize': 20, 'axes.titlesize': 18}
+sns.set(rc=rc)
+sns.set_style("whitegrid", {'axes.grid' : False}) #remove grey grid
+sns.set_context("paper") #changes the theme
+plt.rcParams['figure.figsize'] = [16, 7] #changes the size
+
+
+#Function for separating out towns.
+def getTown(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    '''
+    Give the dataframe and a town number.
+    Returns all columns for that town.
+    '''
+    #Rename Date Column 
+    df.rename(columns = {'Last update date':'Date'}, inplace = True)
+    #Make date a proper datetime object
+    df['Date'] = pd.to_datetime(df.Date)
+    #Sort by Date
+    df.sort_values(by='Date')
+    #Reset Index 
+    #Grab all elements of big array with this town number
+    j = df.loc[df["Town number"] == n]
+    #Reset index now that other towns are gone
+    j.reset_index(drop=True, inplace=True)
+    return(j)
+    
+def cleandatAge(df: pd.DataFrame,
+                    diff = False,
+                    loess = False) -> pd.DataFrame:
+    ''' Take in a dataframe that sucks and output a 
+        dataframe that has the right dates,
+        is in the right order,
+        is disagregated if diff = True, 
+        and is smoothed if loess = True. 
+        
+        Also fix some column names.
+    '''
+    df['Date'] = pd.to_datetime(df.Date)
+    df = df.sort_values(by='Date')
+    j = df.reset_index(drop=True)
+    return(j)
+    
+    
+    
+    
+
+
+def getPeak(df:pd.DataFrame, n:int, metric:str) -> pd.DataFrame:
+    '''
+    given original dataframe df, town number n, and metric str, 
+    return the day at which the most NEW (metric) were recorded.
+    For plotting lines on graphs :D
+    '''
+    maximum = getTown(ByTown, n)[metric].diff().max()
+    q = getTown(ByTown, n).loc[getTown(ByTown, n)[metric].diff() == maximum]
+    q.reset_index(drop=True, inplace=True)
+    
+    #Return the first time the max comes up --- one or two towns reported the
+    #same max cases twice, always within a week. So this removes the ambiguity.
+    
+    return(q.head(1))
+ 
+ 
+def getFullPeakDF(df:pd.DataFrame, metric:str) -> pd.DataFrame:
+    '''
+    Given original dataframe df, and a metric (eg Confirmed cases), return a 
+    dataframe containing the row in which the most new people were registered 
+    as having [metric] eg, testing postitive for Confirmed cases. 
+    '''
+    MaxDF = getPeak(ByTown, 1, metric)
+    for i in range(2,ByTown["Town number"].max()):
+        MaxDF = pd.concat([MaxDF, getPeak(ByTown, i, metric)]) 
+    
+    MaxDF['Date'] = pd.to_datetime(MaxDF.Date)
+    MaxDF = MaxDF.sort_values(by='Date')
+    MaxDF.reset_index(drop=True, inplace=True)
+    
+    return(MaxDF)    
+
+
+
+def plotTownCases(df: pd.DataFrame,
+                  n:int,
+                  metric: str,
+                  col:str,
+                  bins:int = 14,
+                  maxcaseline = False,
+                  IncludeLegend = True):
+    '''
+    Give df(big dataframe) and town number (n) and return a plot
+    of rolling average over (bins) days for daily change in column (metric)
+    '''
+    
+    UnC = getTown(ByTown, n)[metric].diff()
+    
+    plt.ylabel("New {}, ({}- day avg)".format(metric, bins))
+    plt.xticks(rotation=19)
+    if IncludeLegend == True:
+        plt.plot(getTown(ByTown, n)["Date"],
+         UnC.rolling(bins).mean(),
+         label = getTown(ByTown, n)["Town"][0],
+         color = col,linewidth= 4)
+        plt.legend()
+    else:
+        plt.plot(getTown(ByTown, n)["Date"],
+         UnC.rolling(bins).mean(),
+         color = col)
+    
+        
+    if maxcaseline == True:
+        plt.axvline(x=getPeak(df,n,metric)._get_value(0,"Date"),
+                    ls =':',
+                    color= col)
+                    
+def plotAll(df:pd.DataFrame,
+            n:int,
+            metric:str,
+            col:str = 'b',
+            bins:int = 14,
+            mcl = True):
+    '''
+    Plot all the towns and highlight town (n) in (col) with rolling avg over
+    9bins) and maybe a line where there are the most new cases (not avgd)
+    '''
+    for i in range(1, ByTown["Town number"].max()):
+        if i == n:
+            plotTownCases(ByTown, i, metric, col, maxcaseline = mcl,
+                          IncludeLegend = True)
+            
+        else:
+            plotTownCases(ByTown,
+                          i,
+                          metric,
+                          'grey',
+                          maxcaseline = False,
+                          IncludeLegend = False)
+        
+#makes raw data into nice data for optimizer :)
+def npTownForLM(df:pd.DataFrame, n:int, metric: str) -> np.array:
+    #Want np.ndarray with
+    q = getTown(df, n)[metric].tail(len(getTown(df, n)[metric])-70)
+    q = q.to_numpy()
+    return(np.nan_to_num(q))
+    
+def getAgeGroupDF(df:pd.DataFrame, group: str, bins:int = 14) -> pd.DataFrame:
+    '''
+    Make the death data nice
+    '''
+    
+    df.rename(columns = {'DateUpdated' : 'Date'}, inplace = True)
+    df['Date'] = pd.to_datetime(df.Date)
+    df = df.sort_values(by = "Date")
+    j = df.loc[df['AgeGroups'] == group] 
+    j.reset_index(drop = True, inplace  = True)
+    
+    dict0 = {"Date": j["Date"][1:], "Deaths": np.nan_to_num(np.diff(j["Total deaths"]))}
+    _ =  pd.DataFrame(dict0)
+    dict1 = {"Date": _["Date"][bins:], "Deaths": _["Deaths"].rolling(14).mean()[bins:]}
+
+    
+    return(pd.DataFrame(dict1))
+
+
+
+    
+
+```
+
+Next, produce a plot to check the above chunks:
+```{python}
+#Plots
+plotTownCases(ByTown, 13, "Confirmed cases", 'g', maxcaseline = True)
+plotTownCases(ByTown, 151, "Confirmed cases",'b', maxcaseline = True)
+plotTownCases(ByTown, 135, "Confirmed cases", 'y', maxcaseline = True)
+plotTownCases(ByTown, 12, "Confirmed cases", 'r', maxcaseline = True)
+#plotAll(ByTown, 15, "Confirmed cases")
+plotTownCases(ByTown, 83, "Confirmed cases", 'c', maxcaseline = True)
+plt.show()
+```
+
+
+```{python}
+#dataframe stuff:
+agedf = pd.read_csv("agedat.csv")
+ageDeaths = pd.read_csv("ageDeaths.csv")
+j = cleandatAge(agedf, diff = False)
+
+dict0 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age0_9"])}
+df0 = pd.DataFrame(dict0)
+
+dict1 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age10_19"])}
+df1 = pd.DataFrame(dict1)
+
+dict2 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age20_29"])}
+df2 = pd.DataFrame(dict2)
+
+dict3 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age30_39"])}
+df3 = pd.DataFrame(dict3)
+
+dict4 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age40_49"])}
+df4 = pd.DataFrame(dict4)
+
+dict5 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age50_59"])}
+df5 = pd.DataFrame(dict5)
+
+dict6 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age60_69"])}
+df6 = pd.DataFrame(dict6)
+
+dict7 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age70_79"])}
+df7 = pd.DataFrame(dict7)
+
+dict8 = {"Date": j["Date"][1:], "Cases":  np.diff(j["cases_age80_Older"])}
+df8 = pd.DataFrame(dict8)
+
+plt.plot(df1["Date"],df1["Cases"], label ="10 to 19")
+plt.plot(df2["Date"],df2["Cases"], label ="20 to 29")
+plt.plot(df3["Date"],df3["Cases"], label ="30 to 39" )
+plt.plot(df4["Date"],df4["Cases"], label = "40 to 49")
+plt.plot(df5["Date"],df5["Cases"], label ="50 to 59")
+plt.plot(df6["Date"],df6["Cases"], label ="60 to 69")
+plt.plot(df7["Date"],df7["Cases"], label ="70 to 79")
+plt.plot(df8["Date"],df8["Cases"], label = "over 80")
+plt.plot()
+plt.legend()
+
+agedf.columns
+
+```
+
+```{r}
+library(reticulate)
+#LOESS SMOOTHING
+#Actually really really bad. What a shame.
+#based on code by Ben Bolker on Zulip
+dd = py$df0
+x = dd$Date
+y = dd$Cases
+plot(Cases~Date, data=dd)
+
+m = loess(Cases~as.numeric(Date),data=dd)
+lines(dd$Date,predict(m))
+title("loess smoothing of cases, age 0-9")
+```
+
+Compared to rolling avg with two-week bin:
+
+```{python}
+plt.figure(figsize=(20,10))
+plt.plot(df0["Date"], df0["Cases"].rolling(14).mean())
+plt.plot(df0["Date"], df0["Cases"], marker = "o", linestyle="None")
+plt.title("14-day rolling average of cases, age 0-9")
+plt.show()
+```
+
+```{python}
+q = getAgeGroupDF(AgeDeathDat, group = "80 and older", bins = 1)
+
+plt.plot(q["Date"],q["Deaths"])
+
+```
+
+```{python}
+###Make  dataframe for 14-day rolling average dataset of cases
+##Have five age groups so cluster:
+# 0-9  kids stay together
+# 10-19 and 20-29 cluster
+# 30-39 and 40-49 cluster
+# 50-59 and 60-69 cluster
+# 70-79 and 80+ cluster
+bins = 14
+
+
+dict = {"Date": df0["Date"][bins:], "Cases":  df0["Cases"].rolling(14).mean()[bins:]}
+df0_9 = pd.DataFrame(dict)
+
+dict = {"Date": df1["Date"][bins:], "Cases":  (df1["Cases"] + df2["Cases"]).rolling(14).mean()[bins:]}
+df10_29 = pd.DataFrame(dict)
+
+dict = {"Date": df3["Date"][bins:], "Cases":  (df3["Cases"] + df4["Cases"]).rolling(14).mean()[bins:]}
+df30_49  = pd.DataFrame(dict)
+
+dict = {"Date": df1["Date"][bins:], "Cases":  (df5["Cases"] + df6["Cases"]).rolling(14).mean()[bins:]}
+df50_69  = pd.DataFrame(dict)
+
+dict = {"Date": df1["Date"][bins:], "Cases":  (df7["Cases"] + df8["Cases"]).rolling(14).mean()[bins:]}
+df70_89  = pd.DataFrame(dict)
+
+plt.plot(df0_9["Date"], df0_9["Cases"], label = "Under 10")
+plt.plot(df10_29["Date"], df10_29["Cases"], label = "10-29")
+plt.plot(df30_49["Date"], df30_49["Cases"], label = "30-49")
+plt.plot(df50_69["Date"], df50_69["Cases"], label = "50-69")
+plt.plot(df70_89["Date"], df50_69["Cases"], label = "70+")
+plt.legend()
+plt.title("Case Count by Age Group (rolling average)")
+plt.show()
+
+```
+
+
+```{python}
+
+#DEATHS 
+binsNum = 14
+
+#make dataframes:
+df0 = getAgeGroupDF(AgeDeathDat, group = "0-9", bins = binsNum)
+df1 = getAgeGroupDF(AgeDeathDat, group = "10-19", bins =binsNum)
+df2 = getAgeGroupDF(AgeDeathDat, group = "20-29", bins =binsNum)
+df3 = getAgeGroupDF(AgeDeathDat, group = "30-39", bins =binsNum)
+df4 = getAgeGroupDF(AgeDeathDat, group = "40-49", bins =binsNum)
+df5 = getAgeGroupDF(AgeDeathDat, group = "50-59", bins =binsNum)
+df6 = getAgeGroupDF(AgeDeathDat, group = "60-69", bins =binsNum)
+df7 = getAgeGroupDF(AgeDeathDat, group = "70-79", bins =binsNum )
+df8 = getAgeGroupDF(AgeDeathDat, group = "80 and older", bins = binsNum)
+
+
+##Case dictionaries
+dict = {"Date": df0["Date"], "Deaths":  df0["Deaths"].fillna(0)}
+Deaths0_9 = pd.DataFrame(dict)
+
+dict = {"Date": df1["Date"], "Deaths":  (df1["Deaths"] + df2["Deaths"]).fillna(0)}
+Deaths10_29 = pd.DataFrame(dict)
+
+dict = {"Date": df3["Date"], "Deaths":  (df3["Deaths"] + df4["Deaths"]).fillna(0)}
+Deaths30_49  = pd.DataFrame(dict)
+
+dict = {"Date": df5["Date"], "Deaths":  (df5["Deaths"] + df6["Deaths"]).fillna(0)}
+Deaths50_69  = pd.DataFrame(dict)
+
+dict = {"Date": df7["Date"], "Deaths":  (df7["Deaths"] + df8["Deaths"])[:-2].fillna(0)}
+Deaths70_89  = pd.DataFrame(dict)
+
+plt.plot(Deaths0_9["Date"], Deaths0_9["Deaths"], label = "Under 10")
+plt.plot(Deaths10_29["Date"], Deaths10_29["Deaths"], label = "10-29")
+plt.plot(Deaths30_49["Date"], Deaths30_49["Deaths"], label = "30-49")
+plt.plot(Deaths50_69["Date"], Deaths50_69["Deaths"], label = "50-69")
+plt.plot(Deaths70_89["Date"], Deaths70_89["Deaths"], label = "70+")
+plt.legend()
+plt.title("DEATH Count by Age Group (rolling average)")
+
+
+Deaths0_9.tail()
+Deaths70_89.tail()
+plt.show()
+```
+
+
+
+
+
+```{r}
+##Testing
+library(reticulate)
+
+length(py$Deaths70_89$Deaths)
+
+```
+
+```{r}
+plot(diff(run_sim()$D5))
+```
+
+
+```{r}
+###Make  error function
+library(MLmetrics)
+
+errorDeaths =  function(parameters){
+  
+  sim_results = run_sim(params = parameters, length = (length(py$Deaths10_29$Deaths) - 1 ))
+  
+  s1 = (sim_results$D1 )
+  s2 = (sim_results$D2 )
+  s3 = (sim_results$D3 )
+  s4 = (sim_results$D4 )
+  s5 = (sim_results$D5 )
+
+  
+  return(  MSE(s1, py$Deaths0_9$Deaths) + 
+           MSE(s2, py$Deaths10_29$Deaths) +
+           MSE(s3, py$Deaths30_49$Deaths) +
+           MSE(s4, py$Deaths50_69$Deaths) +
+           MSE(s5, py$Deaths70_89$Deaths) )
+}
+
+
+errorCases = function(parameters){
+  
+  sim_results = run_sim(params = parameters, length = (length(py$df10_29$Cases) -1))
+  
+  s1 = (sim_results$I1 + sim_results$Q1 )
+  s2 = (sim_results$I2 + sim_results$Q2 )
+  s3 = (sim_results$I3 + sim_results$Q3 )
+  s4 = (sim_results$I4 + sim_results$Q4 )
+  s5 = (sim_results$I5 + sim_results$Q5 )
+  
+  return(  MSE(s1, py$df0_9$Cases) + 
+           MSE(s2, py$df10_29$Cases) +
+           MSE(s3, py$df30_49$Cases) +
+           MSE(s4, py$df50_69$Cases) +
+           MSE(s5, py$df70_89$Cases) )
+}
+
+Para1 = make_params()
+Para1['Beta'] = 0.42
+Para1['gamma'] = 0.0082
+
+
+print(Para1)
+
+errorCases(Para1)
+errorDeaths(Para1)
+
+sim_results = run_sim(params = Para1, length = (length(py$df10_29$Cases) -1))
+
+run_sim(params = Para1)
+print(sim_results)
+#print((sim_results$I1 + sim_results$Q1 + py$df10_29$Cases))
+```
+
+
+```{r}
+##Using Optim, fit the model
+library(stats)
+
+initparams = make_params()
+
+initparams['Beta'] = 0.4
+
+errorDeaths(initparams)
+results = optim(par = initparams, fn = errorDeaths, method = "L-BFGS-B", control = list(maxit = 1))
+
+results
+```
+
+```{r}
+results$par == make_params()
+
+para = results$par
+```
+
+```{r}
+
+sim_results = run_sim(params = para, length = (length(py$df10_29$Cases) ))
+TotalCases = diff(sim_results$I2 + sim_results$Q2 + sim_results$R2 +sim_results$D2)
+TotalInfected2 = sim_results$I2
+
+
+s1 = diff(cumsum(sim_results$I1))
+#plot(NewCases2)
+plot(sim_results$I4)
+#plot(sim_results$R1)
+#plot(py$df10_29$Cases)
+
+#plot(cumsum(-NewCases2))
+#plot(cumsum(py$df10_29$Cases))
+#plot(sim_results$I1)
+```
+
+
+
+
+
+```{r}
+run_sim(params = initparams)
+run_sim(make_params())
 ```
 
 
