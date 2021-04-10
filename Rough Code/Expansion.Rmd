@@ -6,7 +6,7 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, error=FALSE)
 ```
 
 "Mathematical Models for Assessing Vaccination Scenarios in Several Provinces in Indonesia N. Nuraini, K. Khairudin, P. Hadisoemarto, H. Susanto, A. Hasan, and N. Sumarti"
@@ -105,7 +105,7 @@ run_sim <- function(params = make_params(),
       return(0)
       }
   }
-  if (use_age_structure){
+  if (use_age_structure) {
     if (!use_awareness){
       theModel <- function(time, state, parameters){
       S <- as.matrix(state[1:5])   
@@ -711,7 +711,6 @@ plot(diff(run_sim(c(par, make_beta()),use_awareness = TRUE, length= 100)$D5))
 #Doesn't change anything.
 #cumulative
 plot(run_sim(c(par, make_beta()),use_awareness = TRUE)$D5)
-
 ```
 
 
@@ -719,12 +718,16 @@ plot(run_sim(c(par, make_beta()),use_awareness = TRUE)$D5)
 ###Make  error function
 library(MLmetrics) #Gives nice MLE
 
-errorDeaths =  function(parameters){
-  
+errorDeaths =  function(parameters, trace=FALSE, pause=FALSE, plot_it=FALSE){
+
   #run a simulation for input parameters with output the same length as the dataset
   #subtract one because run_sim is too long by one by default. All dfs same length.
   sim_results = run_sim(params = parameters, length = (length(py$Deaths10_29$Deaths) - 1 ),use_awareness = TRUE)
-  
+
+  if (trace) cat(parameters)
+  if (pause) scan(quiet=TRUE)
+  if (plot_it)  plot_sim(sim_results)
+
   s1 = (sim_results$D1 )
   s2 = (sim_results$D2 )
   s3 = (sim_results$D3 )
@@ -732,22 +735,25 @@ errorDeaths =  function(parameters){
   s5 = (sim_results$D5 )
 
   
-  return(sqrt( MSE(s1, py$Deaths0_9$Deaths) + 
+   rval <- sqrt( MSE(s1, py$Deaths0_9$Deaths) + 
            MSE(s2, py$Deaths10_29$Deaths) +
            MSE(s3, py$Deaths30_49$Deaths) +
            MSE(s4, py$Deaths50_69$Deaths) +
-           MSE(s5, py$Deaths70_89$Deaths)) )
+           MSE(s5, py$Deaths70_89$Deaths))
+
+   if (trace) cat(rval,"\n")
+   return(rval) 
+    
 }
 
-
-errorCases = function(parameters){
+errorCases = function(parameters, plot=FALSE){
   #Back when I was trying to fit to cases I was using this, but
   #fitting to cases is real tough --- I couldn't get a parameter (or combination of parameters) that
   #seemed reasonable to fit diff(Total cases) to. Definitely possible and probably not hard,
   #but vital dynamics making negative diff() in complement of susceptable or similar + people dropping
   #out of infected, cumsum($In) not looking great, and few other things lead me to try with deaths      #instead.
   sim_results = run_sim(params = parameters, length = (length(py$df10_29$Cases) -1),use_awareness = TRUE)
-  
+
   s1 = (sim_results$I1 + sim_results$Q1 )
   s2 = (sim_results$I2 + sim_results$Q2 )
   s3 = (sim_results$I3 + sim_results$Q3 )
@@ -760,8 +766,80 @@ errorCases = function(parameters){
            MSE(s4, py$df50_69$Cases) +
            MSE(s5, py$df70_89$Cases) )
 }
+```
 
+```{r plot_check}
+## BMB machinery to plot sim results and data together to see what the heck is going on
+age_brks <- c(0,10,30,50,70,90)
+age_cats <- sprintf("%d_%d", head(age_brks,-1), age_brks[-1]-1)
+names(age_cats) <- age_cats ## for purrr .id
+tmpf <- function(type="Cases") {
+    dname <- switch(type, Cases="df", Deaths="Deaths")
+    x <- purrr:::map_dfr(age_cats, ~py[[paste0(dname,.)]], .id="agecat")
+    names(x)[names(x)==type] <- "value"
+    x[["type"]] <- type
+    x <- (x
+        %>% group_by(type,agecat)
+        %>% arrange(Date)
+        %>% mutate(time=seq(n()))
+        %>% select(-Date)
+    )
+    return(x)
+}
+get_data <- function() {
+    purrr::map_dfr(c("Cases","Deaths"), tmpf)
+}
+check_deaths <- . %>% filter(type=="Deaths") %>% arrange(agecat)
+get_sim_data <- function(x, diff_deaths=TRUE) {
+    dd <- (x
+        %>% pivot_longer(-time,names_to="state")
+        %>% separate(state,into=c("state","age"),sep=1, convert=TRUE)
+        %>% filter(state %in% c("I","Q","D"))
+        %>% mutate(agecat=age_cats[age],
+                   type=ifelse(state %in% c("I","Q"), "Cases", "Deaths"))
+        %>% group_by(time,type,agecat)
+        %>% summarise(across(value,sum), .groups="drop")  ## this adds I and Q together
+    )
+    if (diff_deaths) {
+        ## convert long-to-wide, modify Deaths, convert wide-to-long
+        dd2 <- (dd
+            %>% pivot_wider(names_from=type,values_from=value)
+            %>% arrange(agecat)
+            %>% group_by(agecat)
+            ## %>% mutate(across(Deaths, ~c(0,diff(.))))
+            %>% mutate(Deaths=c(0,diff(Deaths)))
+            %>% ungroup()
+        )
+        dd <- dd2  %>% pivot_longer(-c(time,agecat), names_to="type")
+    }
+    return(dd)
+}
+g <- get_sim_data(sim_results)
 
+library(ggplot2); theme_set(theme_bw())
+pydat <-  get_data()
+
+#' plot simulations and data by age class and deaths/cases
+#' @param simres simulation results
+#' @param params optional parameters: if specified, will run simulation first
+#' @param diff_deaths difference death variable from sims?
+#' @param ... extra arguments to pass to \code{run_sim}
+plot_simdata <- function(simres, diff_deaths=TRUE, params=NULL, ...) {
+    if (!is.null(params)) {
+        simres <- run_sim(params = params, length = (length(py$df10_29$Cases) -1), ...)
+    }
+    
+    alldat <- bind_rows(list(data=get_data(),
+                             sim=get_sim_data(simres, diff_deaths=diff_deaths)),
+                        .id="source")
+    ggplot(alldat, aes(time,value,linetype=source, colour=source)) +
+        geom_line() +
+        facet_grid(type~agecat,scale="free") +
+        scale_y_log10()
+}
+```
+
+```{r}
 ###Test these out
 
 #Make parameter list
@@ -776,13 +854,16 @@ Para1['gamma'] = 0.0082
 #Print list with new values as check
 print(Para1)
 
+plot_simdata(params=Para1, use_awareness=TRUE)
+
 #Calculate error functions at these new values
 errorCases(Para1)
 errorDeaths(Para1)
 
-#Run a simulation with these parameters to check for wierd infinities like optim claims
-sim_results = run_sim(params = Para1, length = (length(py$df10_29$Cases) -1))
+#Run a simulation with these parameters to check for weird infinities like optim claims
+sim_results = run_sim(params = Para1, length = (length(py$df10_29$Cases) -1), use_awareness=TRUE)
 
+plot_simdata(sim_results)
 #Just use default length --- maybe the issue is with length
 #run_sim(params = Para1)
 #nope
